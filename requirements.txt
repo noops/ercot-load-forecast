@@ -1,0 +1,7 @@
+gridstatus
+pandas
+requests
+scikit-learn
+xgboost
+matplotlib
+certifi
