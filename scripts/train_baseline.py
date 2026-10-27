@@ -10,6 +10,10 @@ since compare_classical.py found that SARIMA's seasonal term alone beat
 this model — the suspicion was XGBoost didn't have an equivalent signal,
 not that gradient boosting is inherently worse here.
 
+v1.2: uses temperature from all 8 ERCOT weather zones instead of Austin
+alone (fetch_data.py now pulls one station per zone) — ERCOT spans
+climates from Houston humidity to West Texas heat to Panhandle cold.
+
 Simplification carried over from v0: uses the actual recorded temperature
 at the target hour as a stand-in for a weather *forecast*. A real forecast
 feed is still a known follow-up (see README).
@@ -27,6 +31,10 @@ HORIZON_HOURS = 24
 TEST_DAYS = 90
 DAILY_HARMONICS = 3
 WEEKLY_HARMONICS = 2
+ZONE_TEMP_COLS = [
+    "temp_c_coast", "temp_c_east", "temp_c_far_west", "temp_c_north",
+    "temp_c_north_central", "temp_c_south_central", "temp_c_southern", "temp_c_west",
+]
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_PATH = ROOT / "data" / "raw" / "ercot_load_weather.csv"
@@ -64,7 +72,8 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     out["target_dow"] = df["dow"].shift(-HORIZON_HOURS)
     out["target_month"] = out["target_time"].dt.month
     out["target_is_weekend"] = out["target_dow"].isin([5, 6]).astype(int)
-    out["target_temp_c"] = df["temp_c"].shift(-HORIZON_HOURS)
+    for col in ZONE_TEMP_COLS:
+        out[f"target_{col}"] = df[col].shift(-HORIZON_HOURS)
 
     out["load_now"] = df["load_mw"]
     # load at (target_time - 168h) == load at (now - (168 - HORIZON_HOURS))
@@ -81,8 +90,8 @@ def main() -> None:
 
     feature_cols = [
         "target_hour", "target_dow", "target_is_weekend", "target_month",
-        "target_temp_c", "load_now", "load_week_before_target",
-    ] + fourier_cols
+        "load_now", "load_week_before_target",
+    ] + [f"target_{c}" for c in ZONE_TEMP_COLS] + fourier_cols
 
     cutoff = data["target_time"].max() - pd.Timedelta(days=TEST_DAYS)
     train = data[data["target_time"] <= cutoff]
