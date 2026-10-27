@@ -16,14 +16,27 @@ window that itself spans the transition from summer heat into fall):
 |---|---|---|
 | Naive (1 week prior) | 3,842 MW | 6.30% |
 | ARIMA(2,1,2) | 2,532 MW | 4.07% |
-| XGBoost (24h ahead) | 2,407 MW | 3.53% |
+| XGBoost + Fourier (24h ahead, all hours) | 2,359 MW | 3.45% |
 | **SARIMA(1,0,1)(1,1,1,24)** | **1,632 MW** | **2.65%** |
 
-**SARIMA wins outright**, and not narrowly — it's the best or tied-best
-model in every month with a reasonable sample size. XGBoost has the richer
-feature set (lags, calendar, temperature) but the seasonal ARIMA term alone
-captures the daily load cycle more cleanly than the gradient-boosted model
-does. Worth sitting with before assuming more features always win.
+**SARIMA still wins**, even after giving XGBoost the same seasonal signal
+SARIMA gets for free. Adding daily + weekly Fourier terms (sin/cos features
+at the 24h and 168h cycles — `scripts/train_baseline.py`) closed some of
+the gap but didn't close all of it. On the exact 89 midnight timestamps
+ARIMA/SARIMA were evaluated on (the fair, matched comparison — see caveat
+below), XGBoost+Fourier scored 3.04% MAPE: clearly ahead of plain ARIMA's
+4.07%, but still behind SARIMA's 2.65%. The seasonal ARIMA term is doing
+something more structurally correct for this series than engineered
+sinusoidal features give a tree model — a real, if modest, finding, not a
+feature-engineering oversight.
+
+**Caveat on that comparison:** the ARIMA/SARIMA backtest only ever forecasts
+from midnight (its rolling origins step by exactly 24h, so every origin
+lands on the same hour-of-day) — 89-90 samples, one hour-of-day only. The
+3.53%/3.45% XGBoost numbers above are averaged across *all* 2,160 hourly
+test points, a harder and more representative task. Extending the classical
+backtest to multiple hours-of-day is the obvious next step before trusting
+this ranking much further (see Known Limitations).
 
 ![Forecast error by month](results/mape_by_month.png)
 
@@ -66,10 +79,11 @@ time, so its error stays flat and low across the full 24-hour horizon.
    Jan 2024 through yesterday instead of the ~30 days the live feed alone
    retains. Matching Austin temperature comes from
    [Open-Meteo](https://open-meteo.com)'s free historical archive.
-2. `scripts/train_baseline.py` builds lag + calendar + temperature features,
-   trains an XGBoost regressor to predict load 24 hours out, and compares it
-   to the naive baseline on a 90-day held-out test window, with a monthly
-   error breakdown.
+2. `scripts/train_baseline.py` builds lag + calendar + temperature +
+   Fourier (daily/weekly sin-cos) features, trains an XGBoost regressor to
+   predict load 24 hours out, and compares it to the naive baseline on a
+   90-day held-out test window, with a monthly error breakdown and a
+   head-to-head against ARIMA/SARIMA on their matched timestamps.
 3. `scripts/compare_classical.py` runs a rolling-origin backtest over the
    same 90-day window: at the start of each test day, fit ARIMA and SARIMA
    on the trailing 21 days of actual load, forecast 24 hours ahead, record
@@ -93,11 +107,16 @@ python3 scripts/compare_classical.py  # ~4 min: 90 daily ARIMA + SARIMA refits
 
 ## Known limitations (v2 candidates)
 
-- **XGBoost hasn't been tuned against SARIMA's win.** SARIMA's seasonal
-  term is a strong, nearly free signal for a series this cyclical.
-  XGBoost's feature set doesn't yet include the equivalent (e.g. Fourier
-  terms for daily/weekly cycles, or SARIMA's residuals as a feature) —
-  worth trying before concluding gradient boosting is actually worse here.
+- **ARIMA/SARIMA were only backtested at one hour-of-day (midnight).**
+  Their rolling origins step by exactly 24h, so all 89-90 samples share an
+  hour-of-day — likely an easier target than, say, a 6pm demand peak.
+  Running the same rolling backtest from multiple hours-of-day (and
+  re-running the XGBoost+Fourier head-to-head against that richer sample)
+  is the highest-value next step before trusting the SARIMA-wins result
+  much further.
+- **Fourier terms closed some, not all, of the gap to SARIMA.** Residual
+  diagnostics on SARIMA's fit, or feeding SARIMA's own forecast as an
+  XGBoost feature, are both reasonable next tries.
 - **Classical models use a short, fixed 21-day trailing window**, refit
   daily. Different window sizes or refit cadences weren't swept.
 - **Temperature is not a forecast.** The model uses the *actual* recorded
