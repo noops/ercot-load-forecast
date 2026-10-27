@@ -6,3 +6,5 @@ xgboost
 matplotlib
 certifi
 openpyxl
+statsmodels
+tqdm
