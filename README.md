@@ -4,7 +4,7 @@ Short-horizon (24h-ahead) load forecasting for the Texas grid: naive
 baseline, ARIMA, SARIMA, and XGBoost, benchmarked against each other on
 the same held-out window.
 
-Status: **v2 — XGBoost overtakes SARIMA once it gets per-zone weather.**
+Status: **v3 — essentially tied once both models get per-zone weather.**
 Part of [Bat City AI](https://batcityai.com)'s Year One programs.
 
 ## Result (most recent run)
@@ -39,6 +39,24 @@ bottleneck wasn't the model architecture, Fourier terms, or anything
 clever — it was that the input data didn't represent the geography of the
 thing being forecast. Worth remembering before reaching for a fancier
 model when a simpler one is underfed.
+
+**The fair rematch:** does SARIMA still lose once it also gets the 8-zone
+weather, as exogenous regressors (SARIMAX)? Checked on the same 00:00-only
+slice as a fast first pass (`scripts/compare_sarimax.py` — the full
+6-hour sweep would take ~60 min, since 8 exogenous regressors makes each
+fit ~3.5x slower):
+
+| Model (00:00 only, 89-90 origins) | MAPE |
+|---|---|
+| SARIMAX(1,0,1)(1,1,1,24) + 8-zone weather | 2.30% |
+| XGBoost + Fourier + 8-zone weather | 2.20% |
+
+**Essentially tied**, XGBoost with a thin edge. Giving SARIMA the weather
+data closed the rest of the gap — the earlier "XGBoost wins outright"
+framing was true on the data each model actually had access to, not
+because gradient boosting is inherently better at this task. The real
+lesson held up through two rounds of giving each model a fairer shot: the
+data mattered far more than the model family.
 
 | Month | XGBoost + Fourier + 8-zone weather | Naive |
 |---|---|---|
@@ -120,12 +138,15 @@ python3 scripts/train_baseline.py
 python3 scripts/compare_classical.py  # ~20-25 min: 535 ARIMA + SARIMA refits (6 hours-of-day x 90 days)
 ```
 
-## Known limitations (v3 candidates)
+## Known limitations (v4 candidates)
 
-- **SARIMA hasn't gotten the same upgrade.** XGBoost now wins, but SARIMA
-  is still univariate — it has never seen temperature at all, let alone
-  8 zones of it. A SARIMAX with exogenous weather regressors is the fair
-  rematch before concluding gradient boosting is really ahead here.
+- **The SARIMAX rematch (below) was only checked at one hour-of-day.**
+  Same methodological risk flagged earlier for plain SARIMA — midnight
+  isn't necessarily representative, and 00:00 happened to be one of
+  SARIMA's *better* hours in the 6-hour sweep. A full multi-hour SARIMAX
+  sweep (~60 min of fitting, 8 exogenous regressors is ~3.5x slower per
+  fit than plain SARIMA) is the real remaining check before trusting
+  "XGBoost is slightly ahead" very far.
 - **Per-zone *load* (not just temperature) is sitting in the data unused.**
   Both ERCOT sources already report load by zone; `fetch_data.py` keeps
   those columns but `train_baseline.py` doesn't use them as features yet.
