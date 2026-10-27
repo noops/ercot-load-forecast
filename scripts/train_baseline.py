@@ -27,14 +27,12 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from xgboost import XGBRegressor
 
+from zones import ZONE_TEMP_COLS
+
 HORIZON_HOURS = 24
 TEST_DAYS = 90
 DAILY_HARMONICS = 3
 WEEKLY_HARMONICS = 2
-ZONE_TEMP_COLS = [
-    "temp_c_coast", "temp_c_east", "temp_c_far_west", "temp_c_north",
-    "temp_c_north_central", "temp_c_south_central", "temp_c_southern", "temp_c_west",
-]
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_PATH = ROOT / "data" / "raw" / "ercot_load_weather.csv"

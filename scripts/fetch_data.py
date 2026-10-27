@@ -34,26 +34,17 @@ import gridstatus  # noqa: E402
 import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 
+from zones import ZONE_STATIONS, zone_temp_col  # noqa: E402
+
 ARCHIVE_URLS = [
     "https://www.ercot.com/files/docs/2024/02/06/Native_Load_2024.zip",
     "https://www.ercot.com/files/docs/2025/02/11/Native_Load_2025.zip",
     "https://www.ercot.com/files/docs/2026/02/10/Native_Load_2026-1-.zip",
 ]
 
-# ERCOT's 8 official weather zones, with a representative city per zone.
-# One canonical name per zone; the two data sources label them differently
-# (the static archives use short codes, the live feed spells them out).
-ZONE_STATIONS = {
-    "Coast": (29.76, -95.37),          # Houston
-    "East": (32.35, -95.30),           # Tyler
-    "Far West": (31.997, -102.077),    # Midland
-    "North": (33.91, -98.49),          # Wichita Falls
-    "North Central": (32.78, -96.80),  # Dallas
-    "South Central": (30.27, -97.74),  # Austin
-    "Southern": (27.80, -97.40),       # Corpus Christi (ERCOT's "South" zone)
-    "West": (31.46, -100.44),          # San Angelo
-}
-
+# The two load data sources label ERCOT's 8 weather zones differently
+# (static archives use short codes, the live feed spells them out) —
+# map both to the canonical names in zones.ZONE_STATIONS.
 ARCHIVE_ZONE_COLUMNS = {
     "COAST": "Coast", "EAST": "East", "FWEST": "Far West", "NORTH": "North",
     "NCENT": "North Central", "SOUTH": "Southern", "SCENT": "South Central", "WEST": "West",
@@ -121,6 +112,33 @@ def fetch_weather(start: date, end: date, lat: float, lon: float) -> pd.Series:
     return pd.DataFrame({"Time": pd.to_datetime(hourly["time"]), "temp": hourly["temperature_2m"]}).set_index("Time")["temp"]
 
 
+def fetch_weather_forecast(lat: float, lon: float, days: int = 2, past_days: int = 3) -> pd.Series:
+    """A real forward-looking forecast (not reanalysis) — used by forecast.py
+    to predict hours that haven't happened yet. Different endpoint than
+    fetch_weather() above, which only has historical/already-observed data.
+
+    past_days bridges ERCOT's own settlement-reporting lag: the live load
+    feed can lag "now" by a day or more, so forecast.py's forecast origin
+    (the latest actual load we have) may itself be in the recent past by
+    the time we need weather for it. One call with past_days+forecast_days
+    covers both that gap and the true future in a single series."""
+    resp = requests.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": "temperature_2m",
+            "past_days": past_days,
+            "forecast_days": days,
+            "timezone": "America/Chicago",
+        },
+        timeout=60,
+    )
+    resp.raise_for_status()
+    hourly = resp.json()["hourly"]
+    return pd.DataFrame({"Time": pd.to_datetime(hourly["time"]), "temp": hourly["temperature_2m"]}).set_index("Time")["temp"]
+
+
 def main() -> None:
     print("Fetching static archives (2024-2026)...")
     archive_frames = [fetch_archive_year(url) for url in ARCHIVE_URLS]
@@ -128,10 +146,12 @@ def main() -> None:
     archive_end = archive_df["Time"].max().date()
 
     live_start = archive_end + timedelta(days=1)
-    live_end = date.today() - timedelta(days=1)
-    if live_start <= live_end:
-        print(f"Fetching live feed {live_start} to {live_end} (post-archive gap)...")
-        live_df = fetch_live_load(live_start, live_end)
+    data_through = date.today() - timedelta(days=1)  # most recent full day
+    if live_start <= data_through:
+        print(f"Fetching live feed {live_start} to {data_through} (post-archive gap)...")
+        # gridstatus treats `end` as exclusive, so request one day past
+        # data_through to actually get data_through's hours included.
+        live_df = fetch_live_load(live_start, data_through + timedelta(days=1))
         load_df = pd.concat([archive_df, live_df]).drop_duplicates("Time").sort_values("Time")
     else:
         load_df = archive_df
@@ -144,8 +164,7 @@ def main() -> None:
     for zone, (lat, lon) in ZONE_STATIONS.items():
         print(f"Fetching weather for {zone} zone ({lat}, {lon})...")
         temp = fetch_weather(overall_start, overall_end, lat, lon)
-        col = f"temp_c_{zone.lower().replace(' ', '_')}"
-        merged[col] = temp
+        merged[zone_temp_col(zone)] = temp
 
     merged = merged.dropna().reset_index()
 
