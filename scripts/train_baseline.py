@@ -105,11 +105,11 @@ def main() -> None:
     print(f"Naive (same hour, 1 week prior):       MAE={mae_naive:,.0f} MW  MAPE={mape_naive:.2%}")
     print(f"XGBoost + Fourier (24h ahead, all hrs): MAE={mae_model:,.0f} MW  MAPE={mape_model:.2%}")
 
-    # Fair head-to-head vs. ARIMA/SARIMA: those only ran a rolling backtest
-    # at ONE hour-of-day (midnight), not every hour like the evaluation
-    # above. Restrict XGBoost to the exact same target timestamps before
-    # comparing, or the comparison silently favors whichever model got the
-    # easier subset of hours.
+    # Fair head-to-head vs. ARIMA/SARIMA: those run a rolling backtest from
+    # a sample of hours-of-day (see compare_classical.py), not every hour
+    # like the evaluation above. Restrict XGBoost to the exact same target
+    # timestamps before comparing, or the comparison silently favors
+    # whichever model got the easier subset of hours.
     if CLASSICAL_RESULTS_PATH.exists():
         classical = pd.read_csv(CLASSICAL_RESULTS_PATH, parse_dates=["origin"])
         matched_targets = classical["origin"] + pd.Timedelta(hours=HORIZON_HOURS)
@@ -120,7 +120,7 @@ def main() -> None:
         mape_arima = (classical["arima_24h_mae"] / classical["actual_24h"]).mean()
         mape_sarima = (classical["sarima_24h_mae"] / classical["actual_24h"]).mean()
 
-        print(f"\nHead-to-head on the exact {len(matched)} midnight-target timestamps SARIMA/ARIMA used:")
+        print(f"\nHead-to-head on the exact {len(matched)} timestamps SARIMA/ARIMA used:")
         print(f"ARIMA(2,1,2):            MAPE={mape_arima:.2%}")
         print(f"XGBoost + Fourier:       MAE={mae_xgb_matched:,.0f} MW  MAPE={mape_xgb_matched:.2%}")
         print(f"SARIMA(1,0,1)(1,1,1,24): MAPE={mape_sarima:.2%}")
